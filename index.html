@@ -22,6 +22,18 @@
                 opacity: 0;
             }
         }
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 0.6s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-purple-50 to-pink-50">
@@ -48,9 +60,9 @@
         let currentUser = null;
         let highlights = [];
         let highlightText = '';
-        let showInput = false;
         let showMenu = false;
         let savedToday = false;
+        let isSaving = false;
         let unsubscribeHighlights = null;
 
         // View all highlights
@@ -139,9 +151,11 @@
             savedToday = !!todayHighlight;
             if (todayHighlight) {
                 highlightText = todayHighlight.text;
-            } else {
+            } else if (savedToday) {
+                // If it's a new day and we had saved yesterday, clear the text
                 highlightText = '';
             }
+            // Otherwise preserve any draft text the user may have typed
         }
 
         // Check for reviews
@@ -195,6 +209,8 @@
                 await auth.signOut();
                 highlightText = '';
                 showMenu = false;
+                savedToday = false;
+                isSaving = false;
             } catch (error) {
                 console.error('Error signing out:', error);
             }
@@ -202,7 +218,14 @@
 
         // Save highlight
         async function saveHighlight() {
-            if (!highlightText.trim() || !currentUser) return;
+            if (!highlightText.trim() || !currentUser || savedToday || isSaving) return;
+            
+            isSaving = true;
+            const saveButton = document.getElementById('saveButton');
+            if (saveButton) {
+                saveButton.innerHTML = '<span class="spinner"></span> Saving...';
+                saveButton.classList.add('opacity-75');
+            }
             
             const today = new Date().toISOString().split('T')[0];
             
@@ -230,12 +253,18 @@
                 
                 highlights.unshift(newHighlight); // Add to beginning since we sort by date desc
                 savedToday = true;
+                isSaving = false;
                 render(); // Now render with updated array
                 showCelebration();
                 
             } catch (error) {
                 console.error('Error saving highlight:', error);
                 alert('Failed to save highlight. Please try again.');
+                isSaving = false;
+                if (saveButton) {
+                    saveButton.innerHTML = 'Save Today\'s Highlight ✨';
+                    saveButton.classList.remove('opacity-75');
+                }
             }
         }
 
@@ -245,6 +274,16 @@
             if (celebration) {
                 celebration.classList.remove('hidden');
                 celebration.classList.add('animate-ping-once');
+                
+                // Play a subtle success sound (optional)
+                try {
+                    const audio = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSxpv+7hnz0FGHbA7OurYBwGPpnh8sxuIAU');
+                    audio.volume = 0.2;
+                    audio.play().catch(() => {}); // Ignore if audio fails
+                } catch (e) {
+                    // Ignore audio errors
+                }
+                
                 setTimeout(() => {
                     celebration.classList.add('hidden');
                     celebration.classList.remove('animate-ping-once');
@@ -411,19 +450,90 @@
         }
 
         // Toggle functions
-        function toggleInput() {
-            showInput = !showInput;
-            render();
-        }
-
         function toggleMenu() {
             showMenu = !showMenu;
             render();
         }
 
+        // Handle keyboard shortcuts
+        function handleKeyPress(event) {
+            // Save on Ctrl/Cmd + Enter
+            if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                event.preventDefault();
+                if (!savedToday && highlightText.trim() && !isSaving) {
+                    saveHighlight();
+                }
+            }
+        }
+
         // Update highlight text
         function updateHighlight(value) {
             highlightText = value;
+            const nowHasText = highlightText.trim() !== '';
+            
+            // Update button state immediately
+            const saveButton = document.getElementById('saveButton');
+            if (saveButton) {
+                if (nowHasText) {
+                    saveButton.classList.remove('opacity-50', 'cursor-not-allowed');
+                    saveButton.classList.add('hover:bg-purple-700', 'hover:shadow-lg');
+                    saveButton.textContent = 'Save Today\'s Highlight ✨';
+                } else {
+                    saveButton.classList.add('opacity-50', 'cursor-not-allowed');
+                    saveButton.classList.remove('hover:bg-purple-700', 'hover:shadow-lg');
+                    saveButton.textContent = 'Write something to save...';
+                }
+            }
+            
+            // Update keyboard tip visibility
+            const keyboardTip = document.getElementById('keyboardTip');
+            if (keyboardTip) {
+                if (nowHasText) {
+                    keyboardTip.classList.remove('opacity-0');
+                    keyboardTip.classList.add('opacity-100');
+                } else {
+                    keyboardTip.classList.remove('opacity-100');
+                    keyboardTip.classList.add('opacity-0');
+                }
+            }
+            
+            // Update character count
+            const charCount = document.getElementById('charCount');
+            if (charCount) {
+                if (highlightText.length > 0) {
+                    charCount.textContent = `${highlightText.length} characters`;
+                    charCount.classList.remove('opacity-0');
+                    charCount.classList.add('opacity-100');
+                } else {
+                    charCount.textContent = '';
+                    charCount.classList.remove('opacity-100');
+                    charCount.classList.add('opacity-0');
+                }
+            }
+            
+            // Update textarea border
+            const textarea = document.getElementById('highlightInput');
+            if (textarea) {
+                if (nowHasText) {
+                    textarea.classList.add('border-purple-300');
+                } else {
+                    textarea.classList.remove('border-purple-300');
+                }
+            }
+        }
+
+        // Get random placeholder text
+        function getPlaceholder() {
+            const placeholders = [
+                "Write about a moment that made you smile today...",
+                "What was the best part of your day?",
+                "Capture a memory worth remembering...",
+                "What made today special?",
+                "Share something that brought you joy today...",
+                "What are you grateful for today?",
+                "Describe a moment that made you happy..."
+            ];
+            return placeholders[Math.floor(Math.random() * placeholders.length)];
         }
 
         // Format date
@@ -518,49 +628,43 @@
                                 ${formatDate(new Date())}
                             </h2>
                             <p class="text-gray-600">
-                                ${savedToday ? 'Your highlight for today is saved ✨' : 'What made today special?'}
+                                ${savedToday ? 'Great job! You\'ve captured today\'s moment ✨' : 'What made today special?'}
                             </p>
                         </div>
 
                         <!-- Highlight Input Area -->
                         <div class="bg-white rounded-2xl shadow-lg p-6 mb-6">
-                            <div class="flex items-center justify-between mb-4">
+                            <div class="mb-4 flex justify-between items-center">
                                 <h3 class="text-lg font-semibold text-gray-800">Today's Highlight</h3>
-                                <button onclick="toggleInput()" class="p-2 hover:bg-gray-100 rounded-lg transition-colors" 
-                                        title="${showInput ? 'Hide input' : 'Show input'}">
-                                    <i data-lucide="${showInput ? 'eye-off' : 'eye'}" class="w-5 h-5"></i>
-                                </button>
+                                ${!savedToday ? `
+                                    <span id="charCount" class="text-sm text-gray-500 transition-opacity duration-300 ${highlightText.length > 0 ? 'opacity-100' : 'opacity-0'}">${highlightText.length > 0 ? `${highlightText.length} characters` : ''}</span>
+                                ` : ''}
                             </div>
                             
-                            ${showInput ? `
-                                <textarea
-                                    value="${highlightText}"
-                                    oninput="updateHighlight(this.value)"
-                                    placeholder="Write about a moment that made you smile today..."
-                                    class="w-full h-32 p-4 border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                    ${savedToday ? 'disabled' : ''}
-                                >${highlightText}</textarea>
-                                
-                                ${!savedToday ? `
-                                    <button onclick="saveHighlight()" 
-                                            ${!highlightText.trim() ? 'disabled' : ''}
-                                            class="mt-4 w-full bg-purple-600 text-white font-medium py-3 rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                                        Save Today's Highlight
-                                    </button>
-                                ` : ''}
-                            ` : `
-                                <div class="text-center py-8">
-                                    <p class="text-gray-500 mb-4">
-                                        ${savedToday ? 'Your highlight is safely stored' : 'Click the eye icon to add your highlight'}
-                                    </p>
-                                    ${savedToday && highlightText ? `
-                                        <p class="text-gray-700 italic">"${highlightText}"</p>
-                                    ` : ''}
+                            <textarea
+                                id="highlightInput"
+                                oninput="updateHighlight(this.value)"
+                                onkeydown="handleKeyPress(event)"
+                                placeholder="${savedToday ? 'You\'ve already captured today\'s highlight!' : getPlaceholder()}"
+                                class="w-full h-32 p-4 border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all ${highlightText && !savedToday ? 'border-purple-300' : ''} ${savedToday ? 'bg-gray-50' : ''}"
+                                ${savedToday ? 'disabled' : ''}
+                            >${highlightText}</textarea>
+                            
+                            ${!savedToday ? `
+                                <button id="saveButton" 
+                                        onclick="saveHighlight()" 
+                                        class="mt-4 w-full bg-purple-600 text-white font-medium py-3 rounded-lg transition-all duration-200 ${!highlightText.trim() ? 'opacity-50 cursor-not-allowed' : 'hover:bg-purple-700 hover:shadow-lg'}">
+                                    ${!highlightText.trim() ? 'Write something to save...' : 'Save Today\'s Highlight ✨'}
+                                </button>
+                                <div class="h-5 mt-2">
+                                    <p id="keyboardTip" class="text-xs text-gray-500 text-center transition-opacity duration-300 ${highlightText.trim() ? 'opacity-100' : 'opacity-0'}">Tip: Press Ctrl+Enter (or Cmd+Enter) to save</p>
                                 </div>
+                            ` : `
+                                <p class="mt-4 text-center text-green-600 font-medium">✨ Today's highlight saved!</p>
                             `}
                             
-                            <div id="celebration" class="hidden">
-                                <i data-lucide="star" class="w-8 h-8 text-yellow-400 mx-auto mt-4"></i>
+                            <div id="celebration" class="hidden mt-4 flex justify-center">
+                                <i data-lucide="star" class="w-8 h-8 text-yellow-400"></i>
                             </div>
                         </div>
 
@@ -584,6 +688,17 @@
             
             // Re-initialize Lucide icons
             lucide.createIcons();
+            
+            // Auto-focus textarea if not saved today and was previously focused
+            if (currentUser && !savedToday) {
+                setTimeout(() => {
+                    const textarea = document.getElementById('highlightInput');
+                    if (textarea && !textarea.disabled && document.activeElement.tagName !== 'TEXTAREA') {
+                        // Only focus if no other textarea is focused
+                        textarea.focus();
+                    }
+                }, 100);
+            }
         }
 
         // Initial render
