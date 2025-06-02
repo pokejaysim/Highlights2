@@ -242,6 +242,71 @@
             render();
         }
 
+        // Debug data function
+        function debugData() {
+            const monthsWithHighlights = {};
+            
+            highlights.forEach(h => {
+                const monthKey = h.date.slice(0, 7); // YYYY-MM
+                if (!monthsWithHighlights[monthKey]) {
+                    monthsWithHighlights[monthKey] = [];
+                }
+                monthsWithHighlights[monthKey].push(h);
+            });
+            
+            const months = Object.keys(monthsWithHighlights).sort().reverse();
+            
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50';
+            modal.innerHTML = `
+                <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col">
+                    <div class="p-6 border-b">
+                        <h2 class="text-2xl font-bold text-gray-800">Debug Data</h2>
+                        <p class="text-gray-600 mt-1">Check your data for issues</p>
+                    </div>
+                    <div class="flex-1 overflow-y-auto p-6">
+                        <div class="space-y-4">
+                            <div class="bg-gray-50 rounded-lg p-4">
+                                <p class="font-semibold mb-2">Current Date Info:</p>
+                                <p class="text-sm text-gray-600">Your timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}</p>
+                                <p class="text-sm text-gray-600">Current local date: ${new Date().toLocaleDateString()}</p>
+                                <p class="text-sm text-gray-600">Current UTC date: ${new Date().toISOString()}</p>
+                            </div>
+                            
+                            <div class="bg-gray-50 rounded-lg p-4">
+                                <p class="font-semibold mb-2">Months with highlights:</p>
+                                ${months.length > 0 ? months.map(month => {
+                                    const count = monthsWithHighlights[month].length;
+                                    return `<p class="text-sm text-gray-600">${month}: ${count} highlight${count !== 1 ? 's' : ''}</p>`;
+                                }).join('') : '<p class="text-sm text-gray-600">No highlights found</p>'}
+                            </div>
+                            
+                            <div class="bg-gray-50 rounded-lg p-4">
+                                <p class="font-semibold mb-2">First 5 highlights (raw dates):</p>
+                                ${highlights.slice(0, 5).map(h => 
+                                    `<p class="text-sm text-gray-600">${h.date}: "${h.text.substring(0, 30)}..."</p>`
+                                ).join('')}
+                            </div>
+                            
+                            ${months.includes('2025-05') && !highlights.some(h => h.text.length > 0 && h.date.startsWith('2025-05')) ? `
+                                <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+                                    <p class="font-semibold text-red-700 mb-2">⚠️ Possible data issue detected</p>
+                                    <p class="text-sm text-gray-600 mb-2">Found May 2025 in data but no valid highlights for that month.</p>
+                                    <p class="text-sm text-gray-600">This might be test data or a timezone issue when saving.</p>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                    <div class="p-4 border-t">
+                        <button onclick="closeReviewModal()" class="w-full py-2 text-gray-600 hover:text-gray-800 font-medium">
+                            Close
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
         // Toggle favorite status
         async function toggleFavorite(highlightId, currentStatus) {
             try {
@@ -386,6 +451,7 @@
                                             </div>
                                         </div>
                                         <p class="text-gray-700">${h.text}</p>
+                                        <p class="text-xs text-gray-400 mt-1">Raw date: ${h.date}</p>
                                     </div>
                                 `;
                             }).join('')}
@@ -444,7 +510,13 @@
 
         // Check if today's highlight exists
         function checkTodaysHighlight() {
-            const today = new Date().toISOString().split('T')[0];
+            // Get local date (not UTC)
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            const today = `${year}-${month}-${day}`;
+            
             const todayHighlight = highlights.find(h => h.date === today);
             savedToday = !!todayHighlight;
             if (todayHighlight) {
@@ -527,7 +599,14 @@
                 saveButton.classList.add('opacity-75');
             }
             
-            const today = new Date().toISOString().split('T')[0];
+            // Get local date (not UTC)
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            const today = `${year}-${month}-${day}`;
+            
+            console.log('Saving highlight with date:', today);
             
             try {
                 // Add to Firestore
@@ -606,6 +685,10 @@
                 }
                 monthsWithHighlights[monthKey].push(h);
             });
+            
+            // Debug: Log what months we found
+            console.log('Months found in highlights:', Object.keys(monthsWithHighlights));
+            console.log('All highlight dates:', highlights.map(h => ({ date: h.date, text: h.text.substring(0, 30) + '...' })));
             
             // Sort months in descending order
             const sortedMonths = Object.keys(monthsWithHighlights).sort().reverse();
@@ -945,6 +1028,11 @@
                                 <button onclick="exportToExcel()" class="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2 text-sm">
                                     <i data-lucide="download" class="w-4 h-4"></i>
                                     Export to Excel
+                                </button>
+                                
+                                <button onclick="debugData()" class="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2 text-sm text-gray-500">
+                                    <i data-lucide="bug" class="w-4 h-4"></i>
+                                    Debug Data
                                 </button>
                                 
                                 <button onclick="signOut()" class="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2 text-sm text-red-600">
