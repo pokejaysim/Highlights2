@@ -103,7 +103,7 @@
 
             // Sort highlights by date (newest first)
             const sortedHighlights = [...highlights].sort((a, b) => 
-                new Date(b.date) - new Date(a.date)
+                parseLocalDate(b.date) - parseLocalDate(a.date)
             );
 
             // Calculate current streak
@@ -114,7 +114,7 @@
             let checkDate = new Date(today);
             
             for (let i = 0; i < sortedHighlights.length; i++) {
-                const highlightDate = new Date(sortedHighlights[i].date);
+                const highlightDate = parseLocalDate(sortedHighlights[i].date);
                 highlightDate.setHours(0, 0, 0, 0);
                 
                 const diffDays = Math.floor((checkDate - highlightDate) / (1000 * 60 * 60 * 24));
@@ -137,8 +137,8 @@
             let tempStreak = 1;
             
             for (let i = 1; i < sortedHighlights.length; i++) {
-                const prevDate = new Date(sortedHighlights[i - 1].date);
-                const currDate = new Date(sortedHighlights[i].date);
+                const prevDate = parseLocalDate(sortedHighlights[i - 1].date);
+                const currDate = parseLocalDate(sortedHighlights[i].date);
                 prevDate.setHours(0, 0, 0, 0);
                 currDate.setHours(0, 0, 0, 0);
                 
@@ -271,6 +271,7 @@
                                 <p class="text-sm text-gray-600">Your timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}</p>
                                 <p class="text-sm text-gray-600">Current local date: ${new Date().toLocaleDateString()}</p>
                                 <p class="text-sm text-gray-600">Current UTC date: ${new Date().toISOString()}</p>
+                                <p class="text-sm text-gray-600 mt-2 font-medium">Date Storage Format: YYYY-MM-DD (as local date)</p>
                             </div>
                             
                             <div class="bg-gray-50 rounded-lg p-4">
@@ -352,6 +353,12 @@
             }
         }
 
+        // Parse date string as local time (not UTC)
+        function parseLocalDate(dateString) {
+            const [year, month, day] = dateString.split('-').map(num => parseInt(num));
+            return new Date(year, month - 1, day);
+        }
+
         // Toggle favorite status
         async function toggleFavorite(highlightId, currentStatus) {
             try {
@@ -383,7 +390,7 @@
 
             // Prepare data for export
             const exportData = highlights.map(h => ({
-                'Date': new Date(h.date).toLocaleDateString('en-US', { 
+                'Date': parseLocalDate(h.date).toLocaleDateString('en-US', { 
                     weekday: 'short', 
                     month: 'long', 
                     day: 'numeric', 
@@ -486,7 +493,7 @@
                                 return `
                                     <div class="p-4 border ${isYearlyTop ? 'border-yellow-400 bg-yellow-50' : isMonthlyTop ? 'border-purple-400 bg-purple-50' : isFavorite ? 'border-pink-400 bg-pink-50' : 'border-gray-200'} rounded-lg">
                                         <div class="flex justify-between items-start mb-1">
-                                            <p class="text-sm text-gray-500">${new Date(h.date).toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' })}</p>
+                                            <p class="text-sm text-gray-500">${parseLocalDate(h.date).toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' })}</p>
                                             <div class="flex items-center gap-2">
                                                 ${isYearlyTop ? '<span class="text-yellow-600 text-sm">🏆 Year</span>' : ''}
                                                 ${isMonthlyTop ? '<span class="text-purple-600 text-sm">⭐ Month</span>' : ''}
@@ -761,7 +768,7 @@
                         <p class="text-gray-600 mb-6">Choose a month to review your highlights</p>
                         <div class="space-y-3">
                             ${months.map(month => {
-                                const date = new Date(month + '-01');
+                                const date = parseLocalDate(month + '-01');
                                 const monthName = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
                                 const count = monthsData[month].length;
                                 const hasTop = monthsData[month].some(h => h.isMonthlyTop);
@@ -793,7 +800,7 @@
             closeReviewModal(); // Close month selector
             
             const monthHighlights = highlights.filter(h => h.date.startsWith(monthKey));
-            const date = new Date(monthKey + '-01');
+            const date = parseLocalDate(monthKey + '-01');
             const monthName = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
             
             const modal = document.createElement('div');
@@ -811,7 +818,7 @@
                                 return `
                                     <div class="w-full text-left p-4 border ${isTop ? 'border-purple-400 bg-purple-50' : 'border-gray-200'} rounded-lg relative">
                                         <div class="flex justify-between items-start mb-1">
-                                            <p class="text-sm text-gray-500">${new Date(h.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</p>
+                                            <p class="text-sm text-gray-500">${parseLocalDate(h.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</p>
                                             <div class="flex items-center gap-2">
                                                 ${isTop ? '<span class="text-purple-600 text-sm font-medium">⭐ Monthly Favorite</span>' : ''}
                                                 <button id="heart-monthly-${h.id}" onclick="toggleFavorite('${h.id}', ${isFavorite})" class="text-pink-500 hover:text-pink-600 transition-colors">
@@ -854,7 +861,7 @@
                         <div class="space-y-3">
                             ${yearHighlights.map(h => `
                                 <button onclick="selectYearlyTop('${h.id}')" class="w-full text-left p-4 border border-gray-200 rounded-lg hover:bg-purple-50 hover:border-purple-300 transition-all">
-                                    <p class="text-sm text-gray-500 mb-1">${new Date(h.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</p>
+                                    <p class="text-sm text-gray-500 mb-1">${parseLocalDate(h.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</p>
                                     <p class="text-gray-700">${h.text}</p>
                                 </button>
                             `).join('')}
