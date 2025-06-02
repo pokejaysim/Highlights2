@@ -43,6 +43,21 @@
             50% { transform: scale(1.2); }
             100% { transform: scale(1); }
         }
+        .streak-fire {
+            animation: flicker 1.5s ease-in-out infinite;
+        }
+        @keyframes flicker {
+            0%, 100% { transform: scale(1) rotate(0deg); opacity: 1; }
+            25% { transform: scale(1.05) rotate(-2deg); opacity: 0.9; }
+            75% { transform: scale(0.95) rotate(2deg); opacity: 0.95; }
+        }
+        .milestone-badge {
+            animation: bounce 0.5s ease-out;
+        }
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
     </style>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-purple-50 to-pink-50">
@@ -73,6 +88,159 @@
         let savedToday = false;
         let isSaving = false;
         let unsubscribeHighlights = null;
+        let userSettings = null;
+        let currentStreak = 0;
+        let longestStreak = 0;
+        let showEmailSettings = false;
+
+        // Calculate streaks
+        function calculateStreaks() {
+            if (highlights.length === 0) {
+                currentStreak = 0;
+                longestStreak = 0;
+                return;
+            }
+
+            // Sort highlights by date (newest first)
+            const sortedHighlights = [...highlights].sort((a, b) => 
+                new Date(b.date) - new Date(a.date)
+            );
+
+            // Calculate current streak
+            currentStreak = 0;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            let checkDate = new Date(today);
+            
+            for (let i = 0; i < sortedHighlights.length; i++) {
+                const highlightDate = new Date(sortedHighlights[i].date);
+                highlightDate.setHours(0, 0, 0, 0);
+                
+                const diffDays = Math.floor((checkDate - highlightDate) / (1000 * 60 * 60 * 24));
+                
+                if (diffDays === 0) {
+                    currentStreak++;
+                    checkDate.setDate(checkDate.getDate() - 1);
+                } else if (diffDays === 1 && currentStreak === 0) {
+                    // If we haven't posted today but posted yesterday, count from yesterday
+                    currentStreak = 1;
+                    checkDate = new Date(highlightDate);
+                    checkDate.setDate(checkDate.getDate() - 1);
+                } else {
+                    break;
+                }
+            }
+
+            // Calculate longest streak ever
+            longestStreak = currentStreak;
+            let tempStreak = 1;
+            
+            for (let i = 1; i < sortedHighlights.length; i++) {
+                const prevDate = new Date(sortedHighlights[i - 1].date);
+                const currDate = new Date(sortedHighlights[i].date);
+                prevDate.setHours(0, 0, 0, 0);
+                currDate.setHours(0, 0, 0, 0);
+                
+                const diffDays = Math.floor((prevDate - currDate) / (1000 * 60 * 60 * 24));
+                
+                if (diffDays === 1) {
+                    tempStreak++;
+                    longestStreak = Math.max(longestStreak, tempStreak);
+                } else {
+                    tempStreak = 1;
+                }
+            }
+        }
+
+        // Get streak emoji and message
+        function getStreakDisplay(streak) {
+            if (streak === 0) return { emoji: '💫', message: 'Start your streak today!' };
+            if (streak < 3) return { emoji: '✨', message: 'Great start!' };
+            if (streak < 7) return { emoji: '🔥', message: 'Keep it up!' };
+            if (streak < 14) return { emoji: '🔥', message: 'One week! Amazing!' };
+            if (streak < 30) return { emoji: '🔥🔥', message: 'On fire!' };
+            if (streak < 60) return { emoji: '🔥🔥🔥', message: 'Incredible dedication!' };
+            return { emoji: '🏆🔥', message: 'Legendary streak!' };
+        }
+
+        // Load user settings
+        async function loadUserSettings() {
+            if (!currentUser) return;
+            
+            try {
+                const doc = await db.collection('users').doc(currentUser.uid).get();
+                if (doc.exists) {
+                    userSettings = doc.data();
+                } else {
+                    // Create default settings
+                    userSettings = {
+                        emailReminders: false,
+                        reminderTime: '20:00',
+                        email: currentUser.email
+                    };
+                    await db.collection('users').doc(currentUser.uid).set(userSettings);
+                }
+            } catch (error) {
+                console.error('Error loading settings:', error);
+                userSettings = {
+                    emailReminders: false,
+                    reminderTime: '20:00',
+                    email: currentUser.email
+                };
+            }
+        }
+
+        // Update email reminder settings
+        async function updateEmailSettings(enabled, time) {
+            if (!currentUser) return;
+            
+            try {
+                const updates = {
+                    emailReminders: enabled,
+                    reminderTime: time,
+                    email: currentUser.email,
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                };
+                
+                await db.collection('users').doc(currentUser.uid).update(updates);
+                userSettings = { ...userSettings, ...updates };
+                
+                if (enabled) {
+                    alert(`Email reminders enabled! You'll receive a daily reminder at ${formatTime(time)} to ${currentUser.email}`);
+                } else {
+                    alert('Email reminders disabled.');
+                }
+                
+                showEmailSettings = false;
+                render();
+            } catch (error) {
+                console.error('Error updating settings:', error);
+                alert('Failed to update settings. Please try again.');
+            }
+        }
+
+        // Format time for display
+        function formatTime(time24) {
+            const [hours, minutes] = time24.split(':');
+            const hour = parseInt(hours);
+            const ampm = hour >= 12 ? 'PM' : 'AM';
+            const hour12 = hour % 12 || 12;
+            return `${hour12}:${minutes} ${ampm}`;
+        }
+
+        // Show email settings modal
+        function showEmailSettingsModal() {
+            showEmailSettings = true;
+            showMenu = false;
+            render();
+        }
+
+        // Close email settings modal
+        function closeEmailSettings() {
+            showEmailSettings = false;
+            render();
+        }
 
         // Toggle favorite status
         async function toggleFavorite(highlightId, currentStatus) {
@@ -241,6 +409,7 @@
         auth.onAuthStateChanged((user) => {
             currentUser = user;
             if (user) {
+                loadUserSettings();
                 loadHighlights();
                 render();
             } else {
@@ -248,6 +417,7 @@
                     unsubscribeHighlights();
                 }
                 highlights = [];
+                userSettings = null;
                 render();
             }
         });
@@ -266,6 +436,7 @@
                     highlights.push({ id: doc.id, ...doc.data() });
                 });
                 checkTodaysHighlight();
+                calculateStreaks();
                 checkForReviews();
                 render();
             });
@@ -338,6 +509,8 @@
                 showMenu = false;
                 savedToday = false;
                 isSaving = false;
+                currentStreak = 0;
+                longestStreak = 0;
             } catch (error) {
                 console.error('Error signing out:', error);
             }
@@ -383,6 +556,7 @@
                 highlights.unshift(newHighlight); // Add to beginning since we sort by date desc
                 savedToday = true;
                 isSaving = false;
+                calculateStreaks(); // Recalculate streaks
                 render(); // Now render with updated array
                 showCelebration();
                 
@@ -720,6 +894,7 @@
                 // Main app
                 const monthlyTopCount = highlights.filter(h => h.isMonthlyTop).length;
                 const favoriteCount = highlights.filter(h => h.isFavorite).length;
+                const streakDisplay = getStreakDisplay(currentStreak);
                 
                 app.innerHTML = `
                     <!-- Header -->
@@ -761,6 +936,12 @@
                                     Top Highlights
                                 </button>
                                 
+                                <button onclick="showEmailSettingsModal()" class="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2 text-sm">
+                                    <i data-lucide="mail" class="w-4 h-4"></i>
+                                    Email Reminders
+                                    ${userSettings?.emailReminders ? '<span class="text-green-600 text-xs ml-auto">On</span>' : ''}
+                                </button>
+                                
                                 <button onclick="exportToExcel()" class="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2 text-sm">
                                     <i data-lucide="download" class="w-4 h-4"></i>
                                     Export to Excel
@@ -776,6 +957,28 @@
 
                     <!-- Main Content -->
                     <main class="pt-20 pb-8 px-4 max-w-2xl mx-auto">
+                        <!-- Streak Display -->
+                        ${currentStreak > 0 || longestStreak > 0 ? `
+                            <div class="mb-6 bg-white rounded-2xl shadow-lg p-4">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-3">
+                                        <span class="text-3xl ${currentStreak > 0 ? 'streak-fire' : ''}">${streakDisplay.emoji}</span>
+                                        <div>
+                                            <p class="font-bold text-lg text-gray-800">${currentStreak} day streak!</p>
+                                            <p class="text-sm text-gray-600">${streakDisplay.message}</p>
+                                        </div>
+                                    </div>
+                                    ${longestStreak > currentStreak ? `
+                                        <div class="text-right">
+                                            <p class="text-sm text-gray-500">Best: ${longestStreak} days</p>
+                                        </div>
+                                    ` : currentStreak >= 7 && currentStreak === longestStreak ? `
+                                        <span class="milestone-badge text-sm bg-purple-100 text-purple-700 px-3 py-1 rounded-full font-medium">New Record!</span>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        ` : ''}
+                        
                         <div class="text-center mb-8">
                             <h2 class="text-3xl font-bold text-gray-800 mb-2">
                                 ${formatDate(new Date())}
@@ -840,6 +1043,78 @@
                             </div>
                         </div>
                     </main>
+
+                    <!-- Email Settings Modal -->
+                    ${showEmailSettings ? `
+                        <div class="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+                            <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+                                <h2 class="text-2xl font-bold text-gray-800 mb-4">Email Reminder Settings</h2>
+                                
+                                <div class="mb-6">
+                                    <p class="text-gray-600 mb-4">Get a gentle daily reminder to capture your highlight.</p>
+                                    
+                                    <div class="bg-gray-50 rounded-lg p-4 mb-4">
+                                        <p class="text-sm text-gray-700">
+                                            <strong>Email:</strong> ${currentUser.email}
+                                        </p>
+                                    </div>
+                                    
+                                    <div class="space-y-4">
+                                        <label class="flex items-center gap-3">
+                                            <input 
+                                                type="checkbox" 
+                                                id="enableReminders"
+                                                ${userSettings?.emailReminders ? 'checked' : ''}
+                                                class="w-5 h-5 text-purple-600 rounded"
+                                            />
+                                            <span class="text-gray-700">Send me daily reminders</span>
+                                        </label>
+                                        
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-2">
+                                                Reminder Time
+                                            </label>
+                                            <select 
+                                                id="reminderTime"
+                                                class="w-full border border-gray-300 rounded-lg px-4 py-2"
+                                                value="${userSettings?.reminderTime || '20:00'}"
+                                            >
+                                                <option value="18:00" ${userSettings?.reminderTime === '18:00' ? 'selected' : ''}>6:00 PM</option>
+                                                <option value="19:00" ${userSettings?.reminderTime === '19:00' ? 'selected' : ''}>7:00 PM</option>
+                                                <option value="20:00" ${userSettings?.reminderTime === '20:00' ? 'selected' : ''}>8:00 PM</option>
+                                                <option value="21:00" ${userSettings?.reminderTime === '21:00' ? 'selected' : ''}>9:00 PM</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="mt-4 text-xs text-gray-500 space-y-1">
+                                        <p>✓ Only one email per day</p>
+                                        <p>✓ Unsubscribe anytime</p>
+                                        <p>✓ We never share your email</p>
+                                    </div>
+                                </div>
+                                
+                                <div class="flex gap-3">
+                                    <button 
+                                        onclick="updateEmailSettings(document.getElementById('enableReminders').checked, document.getElementById('reminderTime').value)"
+                                        class="flex-1 bg-purple-600 text-white font-medium py-2 rounded-lg hover:bg-purple-700 transition-colors"
+                                    >
+                                        Save Settings
+                                    </button>
+                                    <button 
+                                        onclick="closeEmailSettings()"
+                                        class="flex-1 bg-gray-200 text-gray-700 font-medium py-2 rounded-lg hover:bg-gray-300 transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                                
+                                <p class="mt-4 text-xs text-gray-500 text-center">
+                                    Note: Email sending requires backend setup with Firebase Functions or a third-party service.
+                                </p>
+                            </div>
+                        </div>
+                    ` : ''}
                 `;
             }
             
