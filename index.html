@@ -305,7 +305,142 @@
                     </div>
                 </div>
             `;
+            modal.onclick = function(event) {
+                if (event.target === modal) {
+                    closeEditModal();
+                }
+            };
+            
             document.body.appendChild(modal);
+        }
+
+        // Edit highlight
+        async function editHighlight(highlightId) {
+            const highlight = highlights.find(h => h.id === highlightId);
+            if (!highlight) return;
+            
+            // Create edit modal
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50';
+            modal.onclick = function(event) {
+                if (event.target === modal) {
+                    closeEditModal();
+                }
+            };
+            modal.innerHTML = `
+                <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6">
+                    <div class="flex justify-between items-start mb-4">
+                        <div>
+                            <h2 class="text-2xl font-bold text-gray-800">Edit Highlight</h2>
+                            <p class="text-sm text-gray-600 mt-1">${parseLocalDate(highlight.date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p>
+                        </div>
+                        <span id="editCharCount" class="text-sm text-gray-500">${highlight.text.length} characters</span>
+                    </div>
+                    
+                    <textarea
+                        id="editHighlightText"
+                        class="w-full h-32 p-4 border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        placeholder="Edit your highlight..."
+                        onkeydown="if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); saveEdit('${highlightId}'); }"
+                        oninput="document.getElementById('editCharCount').textContent = this.value.length + ' characters'"
+                    >${highlight.text}</textarea>
+                    
+                    <div class="flex gap-3 mt-4">
+                        <button 
+                            onclick="saveEdit('${highlightId}')"
+                            class="flex-1 bg-purple-600 text-white font-medium py-2 rounded-lg hover:bg-purple-700 transition-colors"
+                        >
+                            Save Changes
+                        </button>
+                        <button 
+                            onclick="closeEditModal()"
+                            class="flex-1 bg-gray-200 text-gray-700 font-medium py-2 rounded-lg hover:bg-gray-300 transition-colors"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                    <p class="text-xs text-gray-500 text-center mt-3">Tip: Press Ctrl+Enter (or Cmd+Enter) to save</p>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            
+            // Focus the textarea
+            setTimeout(() => {
+                const textarea = document.getElementById('editHighlightText');
+                if (textarea) {
+                    textarea.focus();
+                    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+                }
+            }, 100);
+        }
+
+        // Save edited highlight
+        async function saveEdit(highlightId) {
+            const textarea = document.getElementById('editHighlightText');
+            const newText = textarea?.value.trim();
+            
+            if (!newText) {
+                alert('Highlight cannot be empty!');
+                return;
+            }
+            
+            try {
+                await db.collection('highlights').doc(highlightId).update({
+                    text: newText,
+                    lastEdited: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                
+                // Update local array
+                const highlight = highlights.find(h => h.id === highlightId);
+                if (highlight) {
+                    highlight.text = newText;
+                    highlight.lastEdited = new Date();
+                    
+                    // If editing today's highlight, update the main input
+                    const today = new Date();
+                    const year = today.getFullYear();
+                    const month = String(today.getMonth() + 1).padStart(2, '0');
+                    const day = String(today.getDate()).padStart(2, '0');
+                    const todayStr = `${year}-${month}-${day}`;
+                    
+                    if (highlight.date === todayStr) {
+                        highlightText = newText;
+                    }
+                }
+                
+                // Close edit modal
+                closeEditModal();
+                
+                // Refresh the view
+                const modalTitle = document.querySelector('.fixed.inset-0:not(:last-child) h2')?.textContent;
+                if (modalTitle?.includes('All Your Highlights')) {
+                    closeReviewModal();
+                    setTimeout(() => viewAllHighlights(), 100);
+                } else if (modalTitle?.includes('Top Highlights')) {
+                    closeReviewModal();
+                    setTimeout(() => viewTopHighlights(), 100);
+                } else if (modalTitle?.includes('Highlights')) {
+                    const currentMonth = document.querySelector('.fixed.inset-0:not(:last-child)')?.dataset?.month;
+                    if (currentMonth) {
+                        closeReviewModal();
+                        setTimeout(() => showMonthHighlights(currentMonth), 100);
+                    }
+                }
+                
+                // Re-render main view in case we edited today's highlight
+                render();
+                
+                alert('Highlight updated successfully!');
+            } catch (error) {
+                console.error('Error updating highlight:', error);
+                alert('Failed to update highlight. Please try again.');
+            }
+        }
+
+        // Close edit modal
+        function closeEditModal() {
+            const editModal = Array.from(document.querySelectorAll('.fixed.inset-0')).pop();
+            if (editModal) editModal.remove();
         }
 
         // Delete highlight
@@ -500,12 +635,16 @@
                                                 <button id="heart-${h.id}" onclick="toggleFavorite('${h.id}', ${isFavorite})" class="text-pink-500 hover:text-pink-600 transition-colors">
                                                     <i data-lucide="${isFavorite ? 'heart' : 'heart'}" class="w-5 h-5 ${isFavorite ? 'fill-current' : ''}"></i>
                                                 </button>
+                                                <button onclick="editHighlight('${h.id}')" class="text-blue-500 hover:text-blue-600 transition-colors" title="Edit highlight">
+                                                    <i data-lucide="pencil" class="w-5 h-5"></i>
+                                                </button>
                                                 <button onclick="deleteHighlight('${h.id}')" class="text-red-500 hover:text-red-600 transition-colors" title="Delete highlight">
                                                     <i data-lucide="trash-2" class="w-5 h-5"></i>
                                                 </button>
                                             </div>
                                         </div>
                                         <p class="text-gray-700">${h.text}</p>
+                                        ${h.lastEdited ? '<p class="text-xs text-gray-400 italic">Edited</p>' : ''}
                                         <p class="text-xs text-gray-400 mt-1">Raw date: ${h.date}</p>
                                     </div>
                                 `;
@@ -823,6 +962,9 @@
                                                 ${isTop ? '<span class="text-purple-600 text-sm font-medium">⭐ Monthly Favorite</span>' : ''}
                                                 <button id="heart-monthly-${h.id}" onclick="toggleFavorite('${h.id}', ${isFavorite})" class="text-pink-500 hover:text-pink-600 transition-colors">
                                                     <i data-lucide="${isFavorite ? 'heart' : 'heart'}" class="w-5 h-5 ${isFavorite ? 'fill-current' : ''}"></i>
+                                                </button>
+                                                <button onclick="editHighlight('${h.id}')" class="text-blue-500 hover:text-blue-600 transition-colors" title="Edit highlight">
+                                                    <i data-lucide="pencil" class="w-5 h-5"></i>
                                                 </button>
                                                 <button onclick="deleteHighlight('${h.id}')" class="text-red-500 hover:text-red-600 transition-colors" title="Delete highlight">
                                                     <i data-lucide="trash-2" class="w-5 h-5"></i>
