@@ -53,6 +53,48 @@
         let savedToday = false;
         let unsubscribeHighlights = null;
 
+        // View all highlights
+        function viewAllHighlights() {
+            if (highlights.length === 0) {
+                alert('No highlights yet! Start adding daily highlights.');
+                return;
+            }
+            
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50';
+            modal.innerHTML = `
+                <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col">
+                    <div class="p-6 border-b">
+                        <h2 class="text-2xl font-bold text-gray-800">All Your Highlights</h2>
+                        <p class="text-gray-600 mt-1">${highlights.length} memories captured</p>
+                    </div>
+                    <div class="flex-1 overflow-y-auto p-6">
+                        <div class="space-y-3">
+                            ${highlights.map(h => {
+                                const isMonthlyTop = h.isMonthlyTop;
+                                const isYearlyTop = h.isYearlyTop;
+                                return `
+                                    <div class="p-4 border ${isYearlyTop ? 'border-yellow-400 bg-yellow-50' : isMonthlyTop ? 'border-purple-400 bg-purple-50' : 'border-gray-200'} rounded-lg">
+                                        <div class="flex justify-between items-start mb-1">
+                                            <p class="text-sm text-gray-500">${new Date(h.date).toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' })}</p>
+                                            ${isYearlyTop ? '<span class="text-yellow-600 text-sm">🏆 Year</span>' : isMonthlyTop ? '<span class="text-purple-600 text-sm">⭐ Month</span>' : ''}
+                                        </div>
+                                        <p class="text-gray-700">${h.text}</p>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                    <div class="p-4 border-t">
+                        <button onclick="closeReviewModal()" class="w-full py-2 text-gray-600 hover:text-gray-800 font-medium">
+                            Close
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
         // Initialize Lucide icons
         lucide.createIcons();
 
@@ -118,8 +160,22 @@
                     showYearlyReview(yearHighlights);
                 }
             } else if (isFirstOfMonth) {
-                // Check for monthly review
-                promptMonthlyReview();
+                // Show notification about monthly review
+                const lastMonth = new Date();
+                lastMonth.setMonth(lastMonth.getMonth() - 1);
+                const monthYear = lastMonth.toISOString().slice(0, 7);
+                
+                const monthHighlights = highlights.filter(h => 
+                    h.date.startsWith(monthYear) && !h.isMonthlyTop
+                );
+                
+                if (monthHighlights.length > 0) {
+                    setTimeout(() => {
+                        if (confirm(`It's time for your monthly review! Would you like to pick your favorite highlight from ${lastMonth.toLocaleDateString('en-US', { month: 'long' })}?`)) {
+                            showMonthHighlights(monthYear);
+                        }
+                    }, 2000); // Delay to let the app load first
+                }
             }
         }
 
@@ -151,7 +207,8 @@
             const today = new Date().toISOString().split('T')[0];
             
             try {
-                await db.collection('highlights').add({
+                // Add to Firestore
+                const docRef = await db.collection('highlights').add({
                     date: today,
                     text: highlightText.trim(),
                     userId: currentUser.uid,
@@ -160,9 +217,22 @@
                     isYearlyTop: false
                 });
                 
+                // Immediately add to local array for instant feedback
+                const newHighlight = {
+                    id: docRef.id,
+                    date: today,
+                    text: highlightText.trim(),
+                    userId: currentUser.uid,
+                    timestamp: new Date(),
+                    isMonthlyTop: false,
+                    isYearlyTop: false
+                };
+                
+                highlights.unshift(newHighlight); // Add to beginning since we sort by date desc
                 savedToday = true;
+                render(); // Now render with updated array
                 showCelebration();
-                render();
+                
             } catch (error) {
                 console.error('Error saving highlight:', error);
                 alert('Failed to save highlight. Please try again.');
@@ -184,38 +254,97 @@
 
         // Monthly review
         function promptMonthlyReview() {
-            const lastMonth = new Date();
-            lastMonth.setMonth(lastMonth.getMonth() - 1);
-            const monthYear = lastMonth.toISOString().slice(0, 7);
+            // Get all unique months that have highlights
+            const monthsWithHighlights = {};
             
-            const monthHighlights = highlights.filter(h => 
-                h.date.startsWith(monthYear) && !h.isMonthlyTop
-            );
+            highlights.forEach(h => {
+                const monthKey = h.date.slice(0, 7); // YYYY-MM
+                if (!monthsWithHighlights[monthKey]) {
+                    monthsWithHighlights[monthKey] = [];
+                }
+                monthsWithHighlights[monthKey].push(h);
+            });
             
-            if (monthHighlights.length > 0) {
-                showMonthlyReview(monthHighlights, monthYear);
+            // Sort months in descending order
+            const sortedMonths = Object.keys(monthsWithHighlights).sort().reverse();
+            
+            if (sortedMonths.length === 0) {
+                alert('No highlights yet! Start adding daily highlights to review them later.');
+                return;
             }
+            
+            // Show month selector
+            showMonthSelector(sortedMonths, monthsWithHighlights);
         }
 
-        // Show monthly review modal
-        function showMonthlyReview(monthHighlights, monthYear) {
+        // Show month selector modal
+        function showMonthSelector(months, monthsData) {
             const modal = document.createElement('div');
             modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50';
             modal.innerHTML = `
                 <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[80vh] overflow-y-auto">
                     <div class="p-6">
-                        <h2 class="text-2xl font-bold text-gray-800 mb-4">Monthly Review</h2>
-                        <p class="text-gray-600 mb-6">Choose your favorite highlight from last month</p>
+                        <h2 class="text-2xl font-bold text-gray-800 mb-4">Select Month to Review</h2>
+                        <p class="text-gray-600 mb-6">Choose a month to review your highlights</p>
                         <div class="space-y-3">
-                            ${monthHighlights.map(h => `
-                                <button onclick="selectMonthlyTop('${h.id}')" class="w-full text-left p-4 border border-gray-200 rounded-lg hover:bg-purple-50 hover:border-purple-300 transition-all">
-                                    <p class="text-sm text-gray-500 mb-1">${new Date(h.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</p>
-                                    <p class="text-gray-700">${h.text}</p>
-                                </button>
-                            `).join('')}
+                            ${months.map(month => {
+                                const date = new Date(month + '-01');
+                                const monthName = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                                const count = monthsData[month].length;
+                                const hasTop = monthsData[month].some(h => h.isMonthlyTop);
+                                
+                                return `
+                                    <button onclick="showMonthHighlights('${month}')" class="w-full text-left p-4 border border-gray-200 rounded-lg hover:bg-purple-50 hover:border-purple-300 transition-all">
+                                        <div class="flex justify-between items-center">
+                                            <div>
+                                                <p class="font-medium text-gray-800">${monthName}</p>
+                                                <p class="text-sm text-gray-500">${count} highlight${count !== 1 ? 's' : ''}</p>
+                                            </div>
+                                            ${hasTop ? '<span class="text-purple-600 text-sm">✓ Reviewed</span>' : ''}
+                                        </div>
+                                    </button>
+                                `;
+                            }).join('')}
                         </div>
                         <button onclick="closeReviewModal()" class="mt-6 w-full py-2 text-gray-600 hover:text-gray-800">
-                            Skip for now
+                            Close
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
+        // Show highlights for a specific month
+        function showMonthHighlights(monthKey) {
+            closeReviewModal(); // Close month selector
+            
+            const monthHighlights = highlights.filter(h => h.date.startsWith(monthKey));
+            const date = new Date(monthKey + '-01');
+            const monthName = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+            
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50';
+            modal.innerHTML = `
+                <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[80vh] overflow-y-auto">
+                    <div class="p-6">
+                        <h2 class="text-2xl font-bold text-gray-800 mb-2">${monthName} Highlights</h2>
+                        <p class="text-gray-600 mb-6">Select your favorite highlight from this month</p>
+                        <div class="space-y-3">
+                            ${monthHighlights.map(h => {
+                                const isTop = h.isMonthlyTop;
+                                return `
+                                    <button onclick="${!isTop ? `selectMonthlyTop('${h.id}')` : ''}" 
+                                            class="w-full text-left p-4 border ${isTop ? 'border-purple-400 bg-purple-50' : 'border-gray-200'} rounded-lg ${!isTop ? 'hover:bg-purple-50 hover:border-purple-300' : ''} transition-all relative">
+                                        ${isTop ? '<span class="absolute top-2 right-2 text-purple-600 text-sm font-medium">⭐ Monthly Favorite</span>' : ''}
+                                        <p class="text-sm text-gray-500 mb-1">${new Date(h.date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}</p>
+                                        <p class="text-gray-700 ${isTop ? 'pr-24' : ''}">${h.text}</p>
+                                    </button>
+                                `;
+                            }).join('')}
+                        </div>
+                        <button onclick="closeReviewModal()" class="mt-6 w-full py-2 text-gray-600 hover:text-gray-800">
+                            Back to months
                         </button>
                     </div>
                 </div>
@@ -367,6 +496,11 @@
                                 <button onclick="promptMonthlyReview()" class="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2 text-sm">
                                     <i data-lucide="calendar" class="w-4 h-4"></i>
                                     Monthly Review
+                                </button>
+                                
+                                <button onclick="viewAllHighlights()" class="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2 text-sm">
+                                    <i data-lucide="sparkles" class="w-4 h-4"></i>
+                                    View All Highlights
                                 </button>
                                 
                                 <button onclick="signOut()" class="w-full text-left px-3 py-2 hover:bg-gray-100 rounded flex items-center gap-2 text-sm text-red-600">
